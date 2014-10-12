@@ -1,0 +1,5 @@
+*~*
+.directory
+*.kate-swap
+output/*
+*.pyc

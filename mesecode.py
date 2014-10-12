@@ -1,4 +1,4 @@
-import re, sys
+import re, sys, os
 
 # How many spaces in a tab.
 # -1 disables support for spaces as tabs (recommended)
@@ -65,6 +65,10 @@ class ParseError(Exception):
 def throwParseError(msg):
 	print("\033[91mParse Error: " + msg + "\033[0m")
 	sys.exit(-1)
+	
+def checkMkDir(directory):
+	if not os.path.exists(directory):
+		os.makedirs(directory)
 	
 def parse_list(the_list, line):
 	if line == "":
@@ -164,12 +168,26 @@ class Project:
 				if curprop is None:
 					throwParseError("Too many levels of indentation at " + str(lineno))
 				curprop.append(line)
-	
-	def write(self, directory):
-		print("-- Mod namespace: " + self.modname)
-		print("-- Generated using the Minetest Readable Modding Format\n")
+	def get(self):
+		retval = "-- Mod namespace: " + self.modname + "\n"
+		retval += "-- Generated using MeseCode\n\n"
 		for item in self.objects:
-			print(item.build(self))
-				
-				
-Project("test.mese").write("test")
+			retval += item.build(self) + "\n"
+		print(retval)
+		return retval
+		
+	def write(self, directory):
+		if directory.endswith("/"):
+			directory = directory[:-1]
+		checkMkDir(directory)
+		out = open(directory + "/init.lua", "w")
+		out.write(self.get())
+		out.close()
+
+if __name__ == "__main__":
+	if len(sys.argv) == 2:
+		Project(sys.argv[1]).write("output")		
+	elif len(sys.argv) == 3:
+		Project(sys.argv[1]).write(sys.argv[2])
+	else:
+		print("Usage: mesecode.py path/to/file.mese output/directory")
