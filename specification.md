@@ -1,7 +1,6 @@
-Minetest Readable Modding Format
-================================
+MeseCode Specification
+======================
 
-(Just a specification, a converter has not been written)
 
 Here is the definition of default:stone:
 
