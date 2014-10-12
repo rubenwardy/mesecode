@@ -1,0 +1,10 @@
+mod test
+script scripting.lua
+
+node My Node
+	is ground, cracky, silly = 6
+	drops Another Node
+	
+node Another Node
+	name hello
+	eaten 5
