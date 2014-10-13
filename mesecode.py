@@ -16,7 +16,6 @@ eat_lib = """local function item_eat(amt)
 	end
 end"""
 
-
 def throwParseError(msg):
 	print("\033[91mParse Error: " + msg + "\033[0m")
 	sys.exit(-1)
@@ -48,6 +47,8 @@ class MeseCodeParser:
 				if item.line != "":
 					retval.append(item.line)
 			return retval
+		def __iter__(self):
+			return self.children.__iter__()
 			
 	def parse(self, filename):
 		file = open(filename, "r")
@@ -102,6 +103,23 @@ class MeseCodeParser:
 	def createNode(self, parent, line, lineno):
 		return self.Node(parent, line.split(" ")[0], line[len(line.split(" ")[0]) + 1:], line, lineno)
 		
+		
+language_syntax = {
+	'mod': True,
+	'script': True,
+	'requires': True,
+	'uses': True,
+	'depends': True,
+	'node': {
+		'name': True,
+		'is': True,
+		'drops': True,
+		'eaten': True,
+		'tiles': True
+	}
+}
+language_syntax['craftitem'] = language_syntax['node']
+
 class LuaBuilder:
 	class Node:
 		def __init__(self, name, value):
@@ -225,71 +243,89 @@ def interpretNode(project, item, lua):
 		
 class MeseCodeProject:
 	def __init__(self, filename, directory):
-		self.parser = MeseCodeParser().parse(filename)
-		self.modname = None
-		self.requires_eat = False
-		self.index = {}
-		
-		# Open output directory
-		directory = directory.strip()
-		if directory[len(directory)-1] != "/":
-			directory += "/"
-		checkMkDir(directory)
-		depends = open(directory + "depends.txt", "w")
-		
-		# Build index and find mod name
-		for item in self.parser:
-			if item.name == "mod":
-				if self.modname is not None:
-					throwParseError("Mod namespace was redefined on line " + str(item.lineno))
-				self.modname = item.value
-			elif self.modname is None:
-				throwParseError("Mod namespace was not defined (You missed out 'mod nameofmod' at the beginning of the file)")
-
-			if item.name == "node" or item.name == "craftitem":
-				self.index[item.value] = item
-		
-		# Check for modname
-		if self.modname is None:
-			throwParseError("Mod namespace was not defined (You missed out 'mod nameofmod' at the beginning of the file)")
-		
-		# Build init.lua
-		retval = ""
-		for item in self.parser:
-			if item.name == "craftitem":
-				lb = LuaBuilder()
-				interpretItem(self, item, lb)
-				retval += lb.build("minetest.register_craftitem(\"" + getNameFromItem(self.modname, item) + "\", ", 1) + "\n"
-			elif item.name == "node":
-				lb = LuaBuilder()
-				interpretNode(self, item, lb)
-				retval += lb.build("minetest.register_node(\"" + getNameFromItem(self.modname, item) + "\", ", 1) + "\n"
-			elif item.name == "script":
-				retval += "dofile(minetest.get_modpath(\"" + self.modname + "\") .. \"/" + item.value + "\")\n\n"
-			elif item.name == "requires":
-				depends.write(item.value + "\n")
-			elif item.name == "depends":
-				depends.write(item.value + "\n")
-			elif item.name == "uses":
-				depends.write(item.value + "?\n")
-				
-				
-		libs = ""
-		
-		if self.requires_eat:
-			libs += eat_lib + "\n"
-			depends.write("diet?\nhud?\n")
-		depends.close()
-		
-		if libs != "":
-			libs = "-- MeseCode helpers\n" + libs + "\n"
-		libs += "-- Converted from MeseCode\n"
-		libs += "--   ( https://github.com/rubenwardy/mesecode )\n\n"
+		try:
+			self.parser = MeseCodeParser().parse(filename)
+			self.modname = None
+			self.requires_eat = False
+			self.index = {}
 			
-		print(libs + retval)
-		output = open(directory + "init.lua", "w")
-		output.write(libs + retval)
-		output.close()
+			# Open output directory
+			directory = directory.strip()
+			if directory[len(directory)-1] != "/":
+				directory += "/"
+			checkMkDir(directory)
+			depends = open(directory + "depends.txt", "w")
+			
+			# Build index and find mod name
+			for item in self.parser:
+				if item.name == "mod":
+					if self.modname is not None:
+						throwParseError("Mod namespace was redefined on line " + str(item.lineno))
+					self.modname = item.value
+				elif self.modname is None:
+					throwParseError("Mod namespace was not defined (You missed out 'mod nameofmod' at the beginning of the file)")
+
+				if item.name == "node" or item.name == "craftitem":
+					self.index[item.value] = item
+					
+				try:
+					itemsynt = language_syntax[item.name]
+				except KeyError:
+					throwParseError("Unexpected '" + item.name + "' on line " + str(item.lineno))
+					
+				for element in item:
+					try:
+						itemsynt[element.name]
+					except KeyError:
+						throwParseError("Unexpected '" + element.name + "' on line " + str(item.lineno))
+			
+			# Check for modname
+			if self.modname is None:
+				throwParseError("Mod namespace was not defined (You missed out 'mod nameofmod' at the beginning of the file)")
+			
+			# Build init.lua
+			retval = ""
+			for item in self.parser:
+				try:
+					if item.name == "craftitem":
+						lb = LuaBuilder()
+						interpretItem(self, item, lb)
+						retval += lb.build("minetest.register_craftitem(\"" + getNameFromItem(self.modname, item) + "\", ", 1) + "\n"
+					elif item.name == "node":
+						lb = LuaBuilder()
+						interpretNode(self, item, lb)
+						retval += lb.build("minetest.register_node(\"" + getNameFromItem(self.modname, item) + "\", ", 1) + "\n"
+					elif item.name == "script":
+						retval += "dofile(minetest.get_modpath(\"" + self.modname + "\") .. \"/" + item.value + "\")\n\n"
+					elif item.name == "requires":
+						depends.write(item.value + "\n")
+					elif item.name == "depends":
+						depends.write(item.value + "\n")
+					elif item.name == "uses":
+						depends.write(item.value + "?\n")
+				except SystemExit:
+					return
+				except Exception, e:
+					throwParseError("While parsing line " + str(item.lineno) + ": " + str(e))
+					
+			libs = ""
+			
+			if self.requires_eat:
+				libs += eat_lib + "\n"
+				depends.write("diet?\nhud?\n")
+			depends.close()
+			
+			if libs != "":
+				libs = "-- MeseCode helpers\n" + libs + "\n"
+			libs += "-- Converted from MeseCode\n"
+			libs += "--   ( https://github.com/rubenwardy/mesecode )\n\n"
+				
+			print(libs + retval)
+			output = open(directory + "init.lua", "w")
+			output.write(libs + retval)
+			output.close()
+		except Exception, e:
+			throwParseError(str(e))
 
 if __name__ == "__main__":
 	if len(sys.argv) == 2:
