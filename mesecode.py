@@ -49,11 +49,13 @@ class MeseCodeParser:
 			return retval
 		def __iter__(self):
 			return self.children.__iter__()
-			
+		
+	def __init__(self):
+		self.objects = []
+
 	def parse(self, filename):
 		file = open(filename, "r")
 		
-		self.objects = []
 		lineno = 0
 		for line in file.readlines():
 			lineno += 1
@@ -77,18 +79,21 @@ class MeseCodeParser:
 			
 			if indented == 0:
 				# Is top level
-				self.objects.append(self.createNode(None, line, lineno))
+				if line.split(" ")[0] == "include":
+					self.parse(line[len(line.split(" ")[0])+1:])
+				else:
+					self.objects.append(self.createNode(None, line, filename + ":" + str(lineno)))
 			else:
 				count = 1
 				if len(self.objects) == 0:
-					throwParseError("Unexpected level of indentation on line " + str(lineno))
+					throwParseError("Unexpected level of indentation on line " + filename + ":" + str(lineno))
 				node = self.objects[len(self.objects) - 1]
 				while count < indented:
 					if len(node.children) == 0:
-						throwParseError("Unexpected level of indentation on line " + str(lineno))
+						throwParseError("Unexpected level of indentation on line " + filename + ":" + str(lineno))
 					node = node.children[len(node.children) - 1]
 					count += 1
-				node.children.append(self.createNode(node, line, lineno))
+				node.children.append(self.createNode(node, line, filename + ":" + str(lineno)))
 				
 		return self
 		
