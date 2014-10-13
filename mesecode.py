@@ -334,8 +334,8 @@ class MeseCodeProject:
 
 if __name__ == "__main__":
 	if len(sys.argv) == 2:
-		Project(sys.argv[1]).write("output")
+		MeseCodeProject(sys.argv[1], "output/")
 	elif len(sys.argv) == 3:
-		Project(sys.argv[1]).write(sys.argv[2])
+		MeseCodeProject(sys.argv[1], sys.argv[2])
 	else:
 		print("Usage: mesecode.py path/to/file.mese output/directory")
