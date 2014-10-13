@@ -2,7 +2,9 @@ mod test
 script scripting.lua
 
 node My Node
-	is ground, cracky, silly = 6
+	is
+		ground
+		cracky
 	drops Another Node
 	
 node Another Node

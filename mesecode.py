@@ -5,63 +5,6 @@ import re, sys, os
 # There are usually 4 spaces in a tab
 SPACES_PER_TAB = -1
 
-class Node():
-	def __init__(self, desc):
-		self.desc = desc
-		self.name = desc.lower().replace(" ", "_")
-		self.groups = []
-		self.last_prop = None
-		self.type = "node"
-		self.eaten = None
-		self.drops = []
-	def build(self, project):
-		name = self.name
-		if name.find(":") == -1:
-			name = project.modname + ":" + name
-		retval = "minetest.register_node(\"" + name + "\", {\n"
-		retval += "\tdescription = \"" + self.desc + "\",\n"
-		
-		if self.eaten is not None:
-			retval += "\ton_use = minetest.item_eat(" + self.eaten + "),\n"
-		
-		is_ground_content = False
-		if len(self.groups) > 0:
-			retval += "\tgroups = {"
-			for group in self.groups:
-				if group == "ground":
-					is_ground_content = True
-					continue
-				if group.find("=") == -1:
-					group += " = 1"
-				retval += group + ", "
-			retval += "}\n"
-		
-		if len(self.drops) == 1:
-			retval += "\tdrop = \"" + project.getItemName(self.drops[0]) + "\",\n"
-		elif len(self.drops) > 1:
-			retval += "\tdrop = {\n"
-			for dropped in self.drops:
-				retval += "\t\t\"" + project.getItemName(dropped) + "\",\n"
-			retval += "\t},"
-		
-		if is_ground_content:
-			retval += "\tis_ground_content = true,\n"
-		retval += "})\n"
-		return retval
-
-class Script:
-	def __init__(self, filename):
-		self.filename = filename
-		self.type = "script"
-	def build(self, project):
-		return "dofile(minetest.get_modpath(\"" + project.modname + "\") .. \"" + self.filename + "\")\n"
-
-class ParseError(Exception):
-	def __init__(self, value):
-		self.value = value
-	def __str__(self):
-		return self.value
-	
 def throwParseError(msg):
 	print("\033[91mParse Error: " + msg + "\033[0m")
 	sys.exit(-1)
@@ -69,31 +12,35 @@ def throwParseError(msg):
 def checkMkDir(directory):
 	if not os.path.exists(directory):
 		os.makedirs(directory)
-	
-def parse_list(the_list, line):
-	if line == "":
-		return
-	arr = line.split(",")
-	for item in arr:
-		item = item.strip()
-		if item != "":
-			the_list.append(item)
 
-class Project:
-	def getItemName(self, desc):
-		for item in self.objects:
-			if item.type == "node" and item.desc.lower() == desc.lower():
-				if item.name.find(":") == -1:
-					return self.modname + ":" + item.name
-				else:
-					return item.name.strip(":")
-		return ""
-	def __init__(self, filename):
+class MeseCodeParser:
+	class Node:
+		def __init__(self, parent, name, value, line, lineno):
+			self.line = line
+			self.lineno = lineno
+			self.name = name
+			self.value = value
+			self.children = []
+		def get(self, name):
+			for item in self.children:
+				if item.name == name:
+					return item
+			return None
+		def as_list(self):
+			retval = []
+			for item in self.value.split(","):
+				item = item.strip()
+				if item != "":
+					retval.append(item)
+			for item in self.children:
+				if item.line != "":
+					retval.append(item.line)
+			return retval
+			
+	def parse(self, filename):
 		file = open(filename, "r")
-
-		self.modname = None
+		
 		self.objects = []
-
 		lineno = 0
 		for line in file.readlines():
 			lineno += 1
@@ -115,74 +62,131 @@ class Project:
 			# Strip redundant symbols
 			line = line.strip()
 			
-			self.processLine(line, indented, lineno)
-			
-	def processLine(self, line, indented, lineno):
-		if indented > 2 or indented < 0:
-			throwParseError("Too many levels of indentation at " + str(lineno))
-		elif indented == 0:
-			#
-			# Top Level Statements
-			#
-			
-			if line.startswith("mod "):
-				if self.modname is not None:
-					throwParseError("Mod name redefined on line " + str(lineno))
-				self.modname = line[4:].strip()
-			elif line.startswith("node "):
-				self.objects.append(Node(line[5:].strip()))
-			elif line.startswith("script "):
-				self.objects.append(Script(line[7:].strip()))
-			else:				
-				throwParseError("Unknown definition on line " + str(lineno))
-		else:
-			if len(self.objects) == 0:
-				throwParseError("Too many levels of indentation at " + str(lineno))
-			curobj = self.objects[len(self.objects) - 1]
-			
-			#
-			# Properties
-			#
-			if indented == 1:
-				curobj.last_prop = None
-				if line.startswith("is"):
-					parse_list(curobj.groups, line[2:].strip())
-					curobj.last_prop = curobj.groups
-				elif line.startswith("name "):
-					curobj.name = line[5:].strip()
-				elif line.startswith("eaten "):
-					curobj.eaten = line[6:].strip()
-				elif curobj.type == "node":
-					if line.startswith("drops "):
-						parse_list(curobj.drops, line[6:].strip())
-						curobj.last_prop = curobj.drops
-					else:
-						throwParseError("Unknown property in '" + curobj.type + "/" + curobj.name + "' on line " + str(lineno))
-				else:
-					throwParseError("Unknown property in '" + curobj.type + "/" + curobj.name + "' on line " + str(lineno))
-			#
-			# Lists
-			#
-			elif indented == 2:
-				curprop = curobj.last_prop
-				if curprop is None:
-					throwParseError("Too many levels of indentation at " + str(lineno))
-				curprop.append(line)
-	def get(self):
-		retval = "-- Mod namespace: " + self.modname + "\n"
-		retval += "-- Generated using MeseCode\n\n"
-		for item in self.objects:
-			retval += item.build(self) + "\n"
-		print(retval)
-		return retval
+			if indented == 0:
+				# Is top level
+				self.objects.append(self.createNode(None, line, lineno))
+			else:
+				count = 1
+				if len(self.objects) == 0:
+					throwParseError("Unexpected level of indentation on line " + str(lineno))
+				node = self.objects[len(self.objects) - 1]
+				while count < indented:
+					if len(node.children) == 0:
+						throwParseError("Unexpected level of indentation on line " + str(lineno))
+					node = node.children[len(node.children) - 1]
+					count += 1
+				node.children.append(self.createNode(node, line, lineno))
+				
+		return self
 		
-	def write(self, directory):
-		if directory.endswith("/"):
-			directory = directory[:-1]
-		checkMkDir(directory)
-		out = open(directory + "/init.lua", "w")
-		out.write(self.get())
-		out.close()
+	def __iter__(self):
+		return self.objects.__iter__()
+		
+	def printOut(self, l, objs):
+		for obj in objs:
+			print((l*"  ") + obj.name + ": " + obj.value)
+			self.printOut(l + 1, obj.children)
+					
+	def createNode(self, parent, line, lineno):
+		return self.Node(parent, line.split(" ")[0], line[len(line.split(" ")[0]) + 1:], line, lineno)
+		
+class LuaBuilder:
+	class Node:
+		def __init__(self, name, value):
+			self.name   = name
+			self.value  = value
+			
+	def __init__(self):
+		self.data = []
+	
+	def set(self, name, value):
+		for item in self.data:
+			if item.name == name:
+				del item
+				break
+		self.data.append(self.Node(name, value))
+		
+	def append(self, name, value):
+		for item in self.data:
+			if item.name == name:
+				item.value.append(value)
+				return
+		self.data.append(self.Node(name, [value]))
+		
+	def build(self, header,  indentation):
+		retval = header + "{\n"
+		for item in self.data:
+			retval += (indentation * "\t") + item.name + " = "
+			if isinstance(item.value, list):
+				retval += "{"
+				for i in item.value:
+					retval += i + ", "
+				retval += "}"
+			else:
+				retval +=  "\"" + item.value + "\""
+			retval += ",\n"
+		retval += "})\n"
+		return retval
+			
+
+def getCode(filename):
+	parser = MeseCodeParser().parse(filename)
+	modname = None
+	index = {}
+	for item in parser:
+		if item.name == "mod":
+			if modname is not None:
+				throwParseError("Mod namespace was redefined on line " + str(item.lineno))
+			modname = item.value
+		elif modname is None:
+			throwParseError("Mod namespace was not defined (You missed out 'mod nameofmod' at the beginning of the file)")
+			
+		if item.name == "node":
+			index[item.value] = item
+	
+	retval = ""
+	for item in parser:
+		if item.name == "node":
+			lb = LuaBuilder()
+			lb.set("description", item.value)
+			
+			groups = item.get("is")
+			if groups is not None:
+				for group in groups.as_list():
+					if group.find("=") == -1:
+						lb.append("groups", group + " = 1")
+					else:
+						lb.append("groups", group)
+						
+			drops = item.get("drops")
+			if drops is not None:
+				for drop in drops.as_list():
+					try:
+						element = index[drop]
+						if element.get("name") is not None:
+							lb.append("drops", "\"" + element.get("name").value + "\"")
+						else:
+							lb.append("drops", "\"" + element.value.lower().replace(" ", "_") + "\"")
+					except KeyError:
+						pass
+						
+			name = item.get("name")
+			if name is None:
+				name = item.value.lower().replace(" ", "_")
+			else:
+				name = name.value
+			retval += lb.build("minetest.register_node(\"" + name + "\", ", 1) + "\n"
+			
+		elif item.name == "script":
+			retval += "dofile(minetest.get_modpath(\"" + modname + "\") .. \"" + item.value + "\")\n\n"
+			
+			
+			
+	if modname is None:
+		throwParseError("Mod namespace was not defined (You missed out 'mod nameofmod' at the beginning of the file)")
+		
+	print(retval)
+	return retval
 
 if __name__ == "__main__":
 	if len(sys.argv) == 2:

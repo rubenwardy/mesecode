@@ -1,4 +1,3 @@
 import mesecode
 
-mesecode.Project("test.mese").write("output")
-
+mesecode.getCode("test.mese")
