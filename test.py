@@ -1,3 +1,3 @@
 import mesecode
 
-mesecode.getCode("test.mese")
+mesecode.MeseCodeProject("test.mese", "output/")

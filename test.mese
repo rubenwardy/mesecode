@@ -1,4 +1,6 @@
 mod test
+requires default
+uses food
 script scripting.lua
 
 node My Node
@@ -7,6 +9,6 @@ node My Node
 		cracky
 	drops Another Node
 	
-node Another Node
-	name hello
+craftitem Another Node
+	name node2
 	eaten 5

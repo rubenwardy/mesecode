@@ -5,6 +5,18 @@ import re, sys, os
 # There are usually 4 spaces in a tab
 SPACES_PER_TAB = -1
 
+# Lua Libraries:
+eat_lib = """function mesecode.item_eat(amt)
+	if minetest.get_modpath("diet") then
+		return diet.item_eat(amt)
+	elseif minetest.get_modpath("hud") then
+		return hud.item_eat(amt)
+	else
+		return minetest.item_eat(amt)
+	end
+end"""
+
+
 def throwParseError(msg):
 	print("\033[91mParse Error: " + msg + "\033[0m")
 	sys.exit(-1)
@@ -106,6 +118,9 @@ class LuaBuilder:
 				break
 		self.data.append(self.Node(name, value))
 		
+	def set_string(self, name, value):
+		self.set(name, "\"" + value + "\"")
+		
 	def append(self, name, value):
 		for item in self.data:
 			if item.name == name:
@@ -123,74 +138,123 @@ class LuaBuilder:
 					retval += i + ", "
 				retval += "}"
 			else:
-				retval +=  "\"" + item.value + "\""
+				retval += item.value
 			retval += ",\n"
 		retval += "})\n"
 		return retval
-			
-
-def getCode(filename):
-	parser = MeseCodeParser().parse(filename)
-	modname = None
-	index = {}
-	for item in parser:
-		if item.name == "mod":
-			if modname is not None:
-				throwParseError("Mod namespace was redefined on line " + str(item.lineno))
-			modname = item.value
-		elif modname is None:
-			throwParseError("Mod namespace was not defined (You missed out 'mod nameofmod' at the beginning of the file)")
-			
-		if item.name == "node":
-			index[item.value] = item
 	
-	retval = ""
-	for item in parser:
-		if item.name == "node":
-			lb = LuaBuilder()
-			lb.set("description", item.value)
+def getNameFromItem(modname, item):
+	name = item.get("name")
+	if name is None:
+		name = item.name.lower().replace(" ", "_")
+	else:
+		name = name.value
+
+	if name.find(":") == -1:
+		return modname + ":" + name
+	else:
+		return name
+	
+def interpretItem(project, item, lua):
+	lua.set_string("description", item.value)
+	groups = item.get("is")
+	if groups is not None:
+		for group in groups.as_list():
+			if group == "ground":
+				lua.set("is_ground_content", "true")
+				continue
 			
-			groups = item.get("is")
-			if groups is not None:
-				for group in groups.as_list():
-					if group.find("=") == -1:
-						lb.append("groups", group + " = 1")
-					else:
-						lb.append("groups", group)
-						
-			drops = item.get("drops")
-			if drops is not None:
-				for drop in drops.as_list():
-					try:
-						element = index[drop]
-						if element.get("name") is not None:
-							lb.append("drops", "\"" + element.get("name").value + "\"")
-						else:
-							lb.append("drops", "\"" + element.value.lower().replace(" ", "_") + "\"")
-					except KeyError:
-						pass
-						
-			name = item.get("name")
-			if name is None:
-				name = item.value.lower().replace(" ", "_")
+			if group.find("=") == -1:
+				lua.append("groups", group + " = 1")
 			else:
-				name = name.value
-			retval += lb.build("minetest.register_node(\"" + name + "\", ", 1) + "\n"
-			
-		elif item.name == "script":
-			retval += "dofile(minetest.get_modpath(\"" + modname + "\") .. \"" + item.value + "\")\n\n"
-			
-			
-			
-	if modname is None:
-		throwParseError("Mod namespace was not defined (You missed out 'mod nameofmod' at the beginning of the file)")
+				lua.append("groups", group)
+	eaten = item.get("eaten")
+	if eaten is not None:
+		project.requires_eat = True
+		lua.set("on_use", "mesecode.item_eat(" + eaten.value + ")")
+				
+def interpretNode(project, item, lua):
+	interpretItem(project, item, lua)
+	
+	drops = item.get("drops")
+	if drops is not None:
+		for drop in drops.as_list():
+			try:
+				if drop.find(":") == -1:
+					lua.append("drops", "\"" + getNameFromItem(project.modname, project.index[drop]) + "\"")
+				else:
+					lua.append("drops", "\"" + drop + "\"")
+			except KeyError:
+				throwParseError("Unable to find an item called '" + drop + "' on line " + str(drops.lineno) + " (Did you forget a : at the start?)")
+				
+class MeseCodeProject:
+	def __init__(self, filename, directory):
+		self.parser = MeseCodeParser().parse(filename)
+		self.modname = None
+		self.requires_eat = False
+		self.index = {}
 		
-	print(retval)
-	return retval
+		# Open output directory
+		directory = directory.strip()
+		if directory[len(directory)-1] != "/":
+			directory += "/"
+		checkMkDir(directory)
+		depends = open(directory + "depends.txt", "w")
+		
+		# Build index and find mod name
+		for item in self.parser:
+			if item.name == "mod":
+				if self.modname is not None:
+					throwParseError("Mod namespace was redefined on line " + str(item.lineno))
+				self.modname = item.value
+			elif self.modname is None:
+				throwParseError("Mod namespace was not defined (You missed out 'mod nameofmod' at the beginning of the file)")
+
+			if item.name == "node" or item.name == "craftitem":
+				self.index[item.value] = item
+		
+		# Check for modname
+		if self.modname is None:
+			throwParseError("Mod namespace was not defined (You missed out 'mod nameofmod' at the beginning of the file)")
+		
+		# Build init.lua
+		retval = ""
+		for item in self.parser:
+			if item.name == "craftitem":
+				lb = LuaBuilder()
+				interpretNode(self, item, lb)
+				retval += lb.build("minetest.register_craftitem(\"" + getNameFromItem(self.modname, item) + "\", ", 1) + "\n"
+			elif item.name == "node":
+				lb = LuaBuilder()
+				interpretNode(self, item, lb)
+				retval += lb.build("minetest.register_node(\"" + getNameFromItem(self.modname, item) + "\", ", 1) + "\n"
+			elif item.name == "script":
+				retval += "dofile(minetest.get_modpath(\"" + self.modname + "\") .. \"" + item.value + "\")\n\n"
+			elif item.name == "requires":
+				depends.write(item.value + "\n")
+			elif item.name == "depends":
+				depends.write(item.value + "\n")
+			elif item.name == "uses":
+				depends.write(item.value + "?\n")
+				
+				
+		libs = ""
+		
+		if self.requires_eat:
+			if libs == "":
+				libs = "local mesecode = {}\n"
+			libs += eat_lib + "\n\n"
+			depends.write("diet?\nhud?\n")
+		depends.close()
+			
+		print(libs + retval)
+		output = open(directory + "init.lua", "w")
+		output.write(libs + retval)
+		output.close()
 
 if __name__ == "__main__":
 	if len(sys.argv) == 2:
-		Project(sys.argv[1]).write("output")		
+		Project(sys.argv[1]).write("output")
 	elif len(sys.argv) == 3:
 		Project(sys.argv[1]).write(sys.argv[2])
 	else:
