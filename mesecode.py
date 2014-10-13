@@ -6,7 +6,7 @@ import re, sys, os
 SPACES_PER_TAB = -1
 
 # Lua Libraries:
-eat_lib = """function mesecode.item_eat(amt)
+eat_lib = """local function item_eat(amt)
 	if minetest.get_modpath("diet") then
 		return diet.item_eat(amt)
 	elseif minetest.get_modpath("hud") then
@@ -157,6 +157,18 @@ def getNameFromItem(modname, item):
 	
 def interpretItem(project, item, lua):
 	lua.set_string("description", item.value)
+
+	if item.name == "craftitem":
+		if item.get("name") is None:
+			lua.set_string("inventory_image", project.modname + "_" + item.name.lower().replace(" ", "_") + ".png")
+		else:
+			lua.set_string("inventory_image", project.modname + "_" + item.get("name").value + ".png")
+
+	eaten = item.get("eaten")
+	if eaten is not None:
+		project.requires_eat = True
+		lua.set("on_use", "item_eat(" + eaten.value + ")")
+
 	groups = item.get("is")
 	if groups is not None:
 		for group in groups.as_list():
@@ -167,26 +179,50 @@ def interpretItem(project, item, lua):
 			if group.find("=") == -1:
 				lua.append("groups", group + " = 1")
 			else:
-				lua.append("groups", group)
-	eaten = item.get("eaten")
-	if eaten is not None:
-		project.requires_eat = True
-		lua.set("on_use", "mesecode.item_eat(" + eaten.value + ")")
-				
+				lua.append("groups", group.replace("= ", "=").replace(" =", "=").replace("=", " = "))
+
 def interpretNode(project, item, lua):
 	interpretItem(project, item, lua)
 	
 	drops = item.get("drops")
 	if drops is not None:
-		for drop in drops.as_list():
+		if len(drops.as_list()) > 1:
+			for drop in drops.as_list():
+				try:
+					if drop.find(":") == -1:
+						lua.append("drop", "\"" + getNameFromItem(project.modname, project.index[drop]) + "\"")
+					else:
+						lua.append("drop", "\"" + drop + "\"")
+				except KeyError:
+					throwParseError("Unable to find an item called '" + drop + "' on line " + str(drops.lineno) + " (Did you forget a : at the start?)")
+		else:
+			drop = drops.as_list()[0]
 			try:
 				if drop.find(":") == -1:
-					lua.append("drops", "\"" + getNameFromItem(project.modname, project.index[drop]) + "\"")
+					lua.set("drop", "\"" + getNameFromItem(project.modname, project.index[drop]) + "\"")
 				else:
-					lua.append("drops", "\"" + drop + "\"")
+					lua.set("drop", "\"" + drop + "\"")
 			except KeyError:
 				throwParseError("Unable to find an item called '" + drop + "' on line " + str(drops.lineno) + " (Did you forget a : at the start?)")
 				
+	tiles = item.get("tiles")
+	if tiles is None or tiles.value == "6x":
+		tile_name = "\"" + project.modname + "_" + item.name.lower().replace(" ", "_")
+		if item.get("name") is not None:
+			tile_name = "\"" + project.modname + "_" + item.get("name").value
+		if tiles is not None and tiles.value == "6x":
+			lua.append("tiles", tile_name + "_top.png\"")
+			lua.append("tiles", tile_name + "_bottom.png\"")
+			lua.append("tiles", tile_name + "_right.png\"")
+			lua.append("tiles", tile_name + "_left.png\"")
+			lua.append("tiles", tile_name + "_back.png\"")
+			lua.append("tiles", tile_name + "_front.png\"")
+		else:
+			lua.append("tiles", tile_name + ".png\"")
+	else:
+		for tile in tiles.as_list():
+			lua.append("tiles", "\"" + tile.name + "\"")
+		
 class MeseCodeProject:
 	def __init__(self, filename, directory):
 		self.parser = MeseCodeParser().parse(filename)
@@ -222,14 +258,14 @@ class MeseCodeProject:
 		for item in self.parser:
 			if item.name == "craftitem":
 				lb = LuaBuilder()
-				interpretNode(self, item, lb)
+				interpretItem(self, item, lb)
 				retval += lb.build("minetest.register_craftitem(\"" + getNameFromItem(self.modname, item) + "\", ", 1) + "\n"
 			elif item.name == "node":
 				lb = LuaBuilder()
 				interpretNode(self, item, lb)
 				retval += lb.build("minetest.register_node(\"" + getNameFromItem(self.modname, item) + "\", ", 1) + "\n"
 			elif item.name == "script":
-				retval += "dofile(minetest.get_modpath(\"" + self.modname + "\") .. \"" + item.value + "\")\n\n"
+				retval += "dofile(minetest.get_modpath(\"" + self.modname + "\") .. \"/" + item.value + "\")\n\n"
 			elif item.name == "requires":
 				depends.write(item.value + "\n")
 			elif item.name == "depends":
@@ -241,11 +277,14 @@ class MeseCodeProject:
 		libs = ""
 		
 		if self.requires_eat:
-			if libs == "":
-				libs = "local mesecode = {}\n"
-			libs += eat_lib + "\n\n"
+			libs += eat_lib + "\n"
 			depends.write("diet?\nhud?\n")
 		depends.close()
+		
+		if libs != "":
+			libs = "-- MeseCode helpers\n" + libs + "\n"
+		libs += "-- Converted from MeseCode\n"
+		libs += "--   ( https://github.com/rubenwardy/mesecode )\n\n"
 			
 		print(libs + retval)
 		output = open(directory + "init.lua", "w")

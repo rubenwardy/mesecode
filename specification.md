@@ -74,7 +74,7 @@ Sometimes you want to give a node multiple tiles.
 mod compass
 
 node Compass
-	6 tiles
+	tiles 6x
 	is cracky, oddly_breakable_by_hand
 ```
 
