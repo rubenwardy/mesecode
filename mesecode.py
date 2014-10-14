@@ -169,7 +169,7 @@ class LuaBuilder:
 def getNameFromItem(modname, item):
 	name = item.get("name")
 	if name is None:
-		name = item.name.lower().replace(" ", "_")
+		name = item.value.lower().replace(" ", "_")
 	else:
 		name = name.value
 
