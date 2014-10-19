@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import re, sys, os
 
 # How many spaces in a tab.

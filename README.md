@@ -13,6 +13,12 @@ The copyright of mesecode scripts, and any resulting Lua files, remains with the
 Usage
 -----
 
-```
+```shell
+# installed
+$ sudo make install
+$ mesecode.py path/to/file.mese output/directory
+
+# or portable version
+
 $ python mesecode.py path/to/file.mese output/directory
 ```
