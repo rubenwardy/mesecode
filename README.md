@@ -9,7 +9,7 @@ Created by rubenwardy, license: GPL 3.0 or later
 ```
 mod candy_gem
 
-node Candy Gem
+craftitem Candy Gem
   is food=2
   eaten 5
 
