@@ -73,7 +73,7 @@ class MeseCodeParser:
 				if line.strip().lower() == "!! end lua":
 					is_lua = False
 				else:
-					self.objects[len(self.objects) - 1].value += line
+					self.objects[len(self.objects) - 1].value += orig
 				continue
 				
 			if line.strip().lower() == "!! lua":
