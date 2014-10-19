@@ -12,3 +12,9 @@ node My Node
 craftitem Another Node
 	name node2
 	eaten 5
+	
+!! Lua
+
+print("Hello!")
+
+!! End Lua

@@ -59,12 +59,31 @@ class MeseCodeParser:
 		file = open(filename, "r")
 		
 		lineno = 0
+		is_lua = False
 		for line in file.readlines():
 			lineno += 1
+			orig = line
 			
 			# Remove comments
 			if line.find("--") != -1:
 				line = line[:line.find("--")]
+				
+			# Lua code blocks
+			if is_lua:
+				if line.strip().lower() == "!! end lua":
+					is_lua = False
+				else:
+					self.objects[len(self.objects) - 1].value += line
+				continue
+				
+			if line.strip().lower() == "!! lua":
+				is_lua = True
+				self.objects.append(self.Node(None, "lua", "", line, lineno))
+				continue
+			
+			
+			
+			# Skip Blank Lines
 			if line.strip() == "":
 				continue
 			
@@ -98,15 +117,15 @@ class MeseCodeParser:
 				node.children.append(self.createNode(node, line, filename + ":" + str(lineno)))
 				
 		return self
-		
+
 	def __iter__(self):
 		return self.objects.__iter__()
-		
+
 	def printOut(self, l, objs):
 		for obj in objs:
 			print((l*"  ") + obj.name + ": " + obj.value)
 			self.printOut(l + 1, obj.children)
-					
+
 	def createNode(self, parent, line, lineno):
 		return self.Node(parent, line.split(" ")[0], line[len(line.split(" ")[0]) + 1:], line, lineno)
 		
@@ -117,11 +136,15 @@ language_syntax = {
 	'requires': True,
 	'uses': True,
 	'depends': True,
+	'lua': True,
 	'node': {
+		# Item
 		'name': True,
 		'is': True,
-		'drops': True,
 		'eaten': True,
+		
+		# Node
+		'drops': True,
 		'tiles': True
 	}
 }
@@ -247,10 +270,11 @@ def interpretNode(project, item, lua):
 	else:
 		for tile in tiles.as_list():
 			lua.append("tiles", "\"" + tile.name + "\"")
-		
+
 class MeseCodeProject:
 	def __init__(self, filename, directory):
-		try:
+		#try:
+		if True:
 			self.parser = MeseCodeParser().parse(filename)
 			self.modname = None
 			self.requires_eat = False
@@ -304,12 +328,16 @@ class MeseCodeProject:
 						retval += lb.build("minetest.register_node(\"" + getNameFromItem(self.modname, item) + "\", ", 1) + "\n"
 					elif item.name == "script":
 						retval += "dofile(minetest.get_modpath(\"" + self.modname + "\") .. \"/" + item.value + "\")\n\n"
+					elif item.name == "lua":
+						retval += item.value
 					elif item.name == "requires":
 						depends.write(item.value + "\n")
 					elif item.name == "depends":
 						depends.write(item.value + "\n")
 					elif item.name == "uses":
 						depends.write(item.value + "?\n")
+					elif item.name != "mod":
+						throwParseError("Unrecognised item on line " + str(item.lineno))
 				except SystemExit:
 					return
 				except Exception, e:
@@ -331,8 +359,8 @@ class MeseCodeProject:
 			output = open(directory + "init.lua", "w")
 			output.write(libs + retval)
 			output.close()
-		except Exception, e:
-			throwParseError(str(e))
+		#except Exception, e:
+		#	throwParseError(str(e))
 
 if __name__ == "__main__":
 	if len(sys.argv) == 2:
